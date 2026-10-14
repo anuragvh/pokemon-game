@@ -868,6 +868,11 @@ const FAITH = {
 // e.g. "https://formspree.io/f/abcdwxyz". Empty = saved in the visitor's browser only.
 const CONTACT_ENDPOINT = "";
 
+// Where every visitor answer is recorded: the web-app URL of the Google Sheet script
+// (see answers-sheet.gs). Each answer becomes a row you can read any time.
+// Empty = answers stay only in the visitor's browser.
+const ANSWERS_ENDPOINT = "https://script.google.com/macros/s/AKfycbxAEi2VirJQKgAhPRNSY1unyDjNg6Ry2SnhLDp8N0n0Qa_P0hRxkCyy00fBU5c97b3Siw/exec";
+
 const DISHES = [
   { name: "MODAK", when: "", story: "", photo: "images/food/modak.jpg" },
   { name: "KACHCHHI DABELI", when: "", story: "",
@@ -894,6 +899,7 @@ const WELCOME = [
   "Welcome in! Each corner of\nthis room shows a side of me.",
   "Walk up to things and press\nZ to look around.",
   "When you're done, climb the\nladder up to the attic.",
+  "Heads up: anything you answer\nor type here gets sent to me.",
 ];
 /* ===================================================================== */
 
@@ -2332,8 +2338,21 @@ store.found = store.found || {};
 store.answers = store.answers || [];
 function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch {} }
 function record(topic, question, answer) {
-  store.answers.push({ topic, question: question.replace(/\n/g, " "), answer, at: new Date().toISOString() });
+  const entry = { topic, question: question.replace(/\n/g, " "), answer, at: new Date().toISOString() };
+  store.answers.push(entry);
   save();
+  sendAnswer(entry);
+}
+// A random ID per visitor, so all of one person's answers can be grouped in the sheet.
+if (!store.visitor) { store.visitor = Math.random().toString(36).slice(2, 10); save(); }
+function sendAnswer(entry) {
+  if (!ANSWERS_ENDPOINT) return;
+  // text/plain + no-cors: a "simple" request Google Apps Script accepts without a preflight.
+  fetch(ANSWERS_ENDPOINT, {
+    method: "POST", mode: "no-cors",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ visitor: store.visitor, name: store.name || "", ...entry }),
+  }).catch(() => {});
 }
 const foundCount = () => TRAIT_IDS.filter(id => store.found[id]).length;
 
@@ -3461,6 +3480,10 @@ async function runDate() {
   store.dates = store.dates || [];
   store.dates.push({ idea: idea.label, name, contact, note, at: new Date().toISOString() });
   save();
+  record("date-request", "Date idea", idea.label);
+  record("date-request", "Name", name);
+  record("date-request", "How to reach them", contact);
+  if (note) record("date-request", "Note", note);
   const result = await sendToMe({
     _subject: `Date request: ${idea.label} with ${name}`,
     name, contact, date: idea.label, note,
@@ -3468,6 +3491,7 @@ async function runDate() {
   });
   if (result === "sent") await say(["Sent! Keep an eye on your\nmessages.", "Thanks for visiting. This was\nreally fun."]);
   else if (result === "failed") await say("Hmm, that didn't go through.\nTry again in a bit?");
+  else if (ANSWERS_ENDPOINT) await say(["Sent! Keep an eye on your\nmessages.", "Thanks for visiting. This was\nreally fun."]);
   else await say(["Saved! The mailbox isn't\nhooked up yet, though.", "Thanks for visiting. This was\nreally fun."]);
 }
 
